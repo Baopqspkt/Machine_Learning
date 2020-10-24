@@ -1,3 +1,10 @@
+"""
+    Author: BaoPham
+    Create on: 20/10/2020
+    Purpose: detection  and recognize traffic sign 
+    Git: https://github.com/Baopqspkt/Machine_Learning branch: master
+"""
+
 import torch
 import torchvision
 from pathlib import Path
@@ -25,94 +32,93 @@ from torch.utils.data import DataLoader
 from torchvision import models
 import gdown
 
+class prediction:
+    def __init__(self):
+        # Select device is cpu
+        self.device = "cpu"
 
-def run():
-    torch.multiprocessing.freeze_support()
-    RANDOM_SEED = 42
-    np.random.seed(RANDOM_SEED)
-    torch.manual_seed(RANDOM_SEED)
+        # Define class name for detectioin
+        self.class_names = ['priority_road', 'give_way', 'stop', 'no_entry']
+        self.DATA_DIR = Path('data')
+        self.DATASETS = ['train', 'val', 'test']
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(device)
+        self.mean_nums = [0.485, 0.456, 0.406]
+        self.std_nums = [0.229, 0.224, 0.225]
 
-    def load_image(img_path, resize=True):
+        self.transforms = {'train': T.Compose([
+            T.RandomResizedCrop(size=256),
+            T.RandomRotation(degrees=15),
+            T.RandomHorizontalFlip(),
+            T.ToTensor(),
+            T.Normalize(self.mean_nums, self.std_nums)
+        ]), 'val': T.Compose([
+            T.Resize(size=256),
+            T.CenterCrop(size=224),
+            T.ToTensor(),
+            T.Normalize(self.mean_nums, self.std_nums)
+        ]), 'test': T.Compose([
+            T.Resize(size=256),
+            T.CenterCrop(size=224),
+            T.ToTensor(),
+            T.Normalize(self.mean_nums, self.std_nums)
+        ]),
+        }
+
+        self.image_datasets = {
+            d: ImageFolder(f'{self.DATA_DIR}/{d}', self.transforms[d]) for d in self.DATASETS
+        }
+
+        self.class_names = self.image_datasets['train'].classes
+    
+        self.base_model = self.create_model(len(self.class_names))
+        self.base_model.load_state_dict(torch.load('best_model_state.bin', map_location=torch.device('cpu')))
+        self.base_model.eval()
+
+    def create_model(self, n_classes):
+        model = models.resnet34(pretrained=False)
+        n_features = model.fc.in_features
+        model.fc = nn.Linear(n_features, n_classes)
+        return model.to(self.device)
+
+    # Covert image to RGB and resize image to 64*64
+    def load_image(self, img_path, resize=True):
         img = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
         if resize:
             img = cv2.resize(img, (64, 64), interpolation=cv2.INTER_AREA)
         return img
 
-    def show_image(img_path):
-        img = load_image(img_path)
+    # Show image in new windown
+    def show_image(self, img_path):
+        img = self.load_image(img_path)
         plt.imshow(img)
         plt.axis('off')
         plt.show()
 
-    class_names = ['priority_road', 'give_way', 'stop', 'no_entry']
-    DATA_DIR = Path('data')
-    DATASETS = ['train', 'val', 'test']
-
-    mean_nums = [0.485, 0.456, 0.406]
-    std_nums = [0.229, 0.224, 0.225]
-
-    transforms = {'train': T.Compose([
-        T.RandomResizedCrop(size=256),
-        T.RandomRotation(degrees=15),
-        T.RandomHorizontalFlip(),
-        T.ToTensor(),
-        T.Normalize(mean_nums, std_nums)
-    ]), 'val': T.Compose([
-        T.Resize(size=256),
-        T.CenterCrop(size=224),
-        T.ToTensor(),
-        T.Normalize(mean_nums, std_nums)
-    ]), 'test': T.Compose([
-        T.Resize(size=256),
-        T.CenterCrop(size=224),
-        T.ToTensor(),
-        T.Normalize(mean_nums, std_nums)
-    ]),
-    }
-
-    image_datasets = {
-        d: ImageFolder(f'{DATA_DIR}/{d}', transforms[d]) for d in DATASETS
-    }
-
-    class_names = image_datasets['train'].classes
-    print("CLASS_NAMES: ",class_names)
-
-    def create_model(n_classes):
-        model = models.resnet34(pretrained=False)
-        n_features = model.fc.in_features
-        model.fc = nn.Linear(n_features, n_classes)
-        return model.to(device)
-
-    base_model = create_model(len(class_names))
-    base_model.load_state_dict(torch.load('best_model_state.bin', map_location=torch.device('cpu')))
-    base_model.eval()
-
-    def predict_proba(model, image_path):
+    def predict_proba(self, image_path):
         img = Image.open(image_path)
         img = img.convert('RGB')
-        img = transforms['test'](img).unsqueeze(0)
+        img = self.transforms['test'](img).unsqueeze(0)
 
-        pred = model(img.to(device))
+        pred = self.base_model(img.to(self.device))
         pred = F.softmax(pred, dim=1)
         return pred.detach().cpu().numpy().flatten()
 
-    def show_prediction_confidence(prediction, class_names):
+    def show_prediction_confidence(self, prediction):
         pred_df = pd.DataFrame({
-            'class_names': class_names,
+            'class_names': self.class_names,
             'values': prediction
         })
         sns.barplot(x='values', y='class_names', data=pred_df, orient='h')
         plt.xlim([0, 1])
         plt.show()
 
-    show_image('stop-sign-1.jpg')
-    pred = predict_proba(base_model, 'stop-sign-1.jpg')
-    print(pred)
-    show_prediction_confidence(pred, class_names)
+def run(path_image_show):
+
+    prediction_sign = prediction()
+    prediction_sign.show_image(path_image_show)
+    pred = prediction_sign.predict_proba(path_image_show)
+    prediction_sign.show_prediction_confidence(pred)
 
    
 if __name__ == '__main__':
-    run()
+    run("data_test/stop-sign-3.jpg")
